@@ -1,0 +1,29 @@
+[package]
+version = "0.1.0"
+name = "fibonacci-script"
+edition = "2021"
+default-run = "fibonacci"
+
+[[bin]]
+name = "fibonacci"
+path = "src/bin/main.rs"
+
+[dependencies]
+sp1-sdk = "=5.0.3"
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+serde = { version = "1.0.200", default-features = false, features = ["derive"] }
+clap = { version = "4.0", features = ["derive", "env"] }
+tracing = "0.1.40"
+hex = "0.4.3"
+alloy-sol-types = { workspace = true }
+dotenv = "0.15.0"
+pessimistic-proof-core = { git = "https://github.com/agglayer/agglayer", branch = "main", package = "pessimistic-proof-core" }
+pessimistic-proof = { git = "https://github.com/agglayer/agglayer", branch = "main", package = "pessimistic-proof" }
+agglayer-types = { git = "https://github.com/agglayer/agglayer", branch = "main", package = "agglayer-types" }
+agglayer-tries = { version = "0.8.0" }
+alloy-primitives = { version = "1.0.9" }
+alloy = { version = "1.0.9", features = ["full"] }
+tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "full", "signal"] }
+
+[build-dependencies]
+sp1-build = "=5.0.0"
