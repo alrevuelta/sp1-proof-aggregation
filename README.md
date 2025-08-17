@@ -6,9 +6,9 @@ verifiable onchain that aggregates all `n` proofs into a single one. This effect
 consumption since instead of verifyng `n` proofs, just 1 has to be verified.
 
 Content:
-* `contracts`: Contains solidity code to verify single and multiple Pessimistic Proofs.
-* `aggregation`: Contains an SP1 program that creates a single proof verifying that `n` proofs are valid.
-* `script`: Contains a set of commands to generate state transitions, prove them using the Pessimistic Proof and aggregate said proofs into a single one. Outputs what's needed as input for the smart contract.
+* `contracts`: Contains solidity code to verify single and multiple Pessimistic Proofs. See [VerifyPessimisticProof](https://github.com/alrevuelta/sp1-proof-aggregation/blob/main/contracts/src/VerifyPessimisticProof.sol)
+* `aggregation`: Contains an SP1 program that creates a single proof verifying that `n` proofs are valid. See [main.rs](https://github.com/alrevuelta/sp1-proof-aggregation/blob/main/aggregation/src/main.rs)
+* `script`: Contains a set of commands to generate state transitions, prove them using the Pessimistic Proof and aggregate said proofs into a single one. Outputs what's needed as input for the smart contract. See [main.rs](https://github.com/alrevuelta/sp1-proof-aggregation/blob/main/script/src/bin/main.rs)
 
 See instruction on how to:
 * Deploy the contracts
