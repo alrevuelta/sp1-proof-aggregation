@@ -5,35 +5,32 @@ import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 
 contract VerifyPessimisticProof {
     address public verifier;
-    bytes32 public programVKey;
+    mapping(uint32 => bytes32) public hashMapping;
 
-    constructor(address _verifier, bytes32 _programVKey) {
+    constructor(address _verifier) {
         verifier = _verifier;
-        programVKey = _programVKey;
     }
 
-    function verifyPessimisticProof(bytes calldata _publicValues, bytes calldata _proofBytes)
+    function getVerifier() public view returns (address) {
+        return verifier;
+    }
+
+    function verifyPessimisticProof(bytes32 _vKey, bytes calldata _publicValues, bytes calldata _proofBytes)
         public
-        view
     {
-        ISP1Verifier(verifier).verifyProof(programVKey, _publicValues, _proofBytes);
+        // Do stuff
+        ISP1Verifier(verifier).verifyProof(_vKey, _publicValues, _proofBytes);
+
+        // TODO: Decode parameters of aggchainid and new LER and store them in the mapping.
+        hashMapping[0] = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
     }
 
-    function verifyGenericProof(
-        bytes32 _vKey,
-        bytes calldata _publicValues,
-        bytes calldata _proofBytes
-    ) public view returns (bool success, bytes memory errorData) {
-        try ISP1Verifier(verifier).verifyProof(_vKey, _publicValues, _proofBytes) {
-            return (true, "");
-        } catch Error(string memory reason) {
-            return (false, bytes(reason));
-        } catch (bytes memory lowLevelData) {
-            return (false, lowLevelData);
-        }
-    }
+    function verifyMultiplePessimisticProofs(bytes32 _vKey, bytes calldata _publicValues, bytes calldata _proofBytes)
+        public
+    {
+        ISP1Verifier(verifier).verifyProof(_vKey, _publicValues, _proofBytes);
 
-    function getVKey() public view returns (bytes32) {
-        return programVKey;
+        // TODO: Decode parameters of aggchainid and new LER and store them in the mapping.
+        hashMapping[0] = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
     }
 }

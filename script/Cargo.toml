@@ -24,6 +24,7 @@ agglayer-tries = { version = "0.8.0" }
 alloy-primitives = { version = "1.0.9" }
 alloy = { version = "1.0.9", features = ["full"] }
 tokio = { version = "1.42", features = ["rt-multi-thread", "macros", "full", "signal"] }
+futures = "0.3"
 
 [build-dependencies]
 sp1-build = "=5.0.0"

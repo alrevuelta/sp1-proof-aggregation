@@ -1,143 +1,184 @@
-# TODO
+# sp1-proof-aggregation
 
-My instructions
+This repo contains an end to end proof of concept of a Pessimistic Proof aggregation of Polygon's Agglayer.
+Given a set of `n` Pessimistic Proofs using SP1, the program present in here creates a single PLONK proof
+verifiable onchain that aggregates all `n` proofs into a single one. This effectively reduces the onchain gas
+consumption since instead of verifyng `n` proofs, just 1 has to be verified.
 
-run "anvil"
+Content:
+* `contracts`: Contains solidity code to verify single and multiple Pessimistic Proofs.
+* `aggregation`: Contains an SP1 program that creates a single proof verifying that `n` proofs are valid.
+* `script`: Contains a set of commands to generate state transitions, prove them using the Pessimistic Proof and aggregate said proofs into a single one. Outputs what's needed as input for the smart contract.
 
-todo. may require manual creation of some file and add some stuff to env…
+See instruction on how to:
+* Deploy the contracts
+* Create the proofs
+* Verify the proofs
 
-go to cd contracts.
+## Deploy the contracts
 
-seems like i have to deploy this first
-FOUNDRY_PROFILE=deploy forge script ./lib/sp1-contracts/contracts/script/deploy/SP1VerifierGatewayPlonk.s.sol:SP1VerifierGatewayScript --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --broadcast --rpc-url http://127.0.0.1:8545 --chain-id 31337
+A local test network is used, see [anvil](https://docs.rs/anvil/latest/anvil/). Create an instance of it.
 
-and then this, which automatically adds the route?
-FOUNDRY_PROFILE=deploy forge script ./lib/sp1-contracts/contracts/script/deploy/v4.0.0-rc.3/SP1VerifierPlonk.s.sol:SP1VerifierScript --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80  --broadcast --rpc-url http://127.0.0.1:8545 --chain-id 31337
+```
+anvil
+```
 
-got this: 0x4e59b44847b379578588920ca78fbf26c0b4956c for sp1 plonk verif.
-
-export VERIFIER=0x4e59b44847b379578588920ca78fbf26c0b4956c
-
-sepolia plonk is this
-0x3B6041173B80E77f038f3F2C0f9744f04837185e
-
-export VERIFIER=0xfa6e4cf6d9fbdb0f8788401914679419386afaea
-
-get the vkey.
-export PROGRAM_VKEY=0x0040a8f70d0e50dad1c1f2a92684deb37a3bb9c6c796c83b34497b4411fc3fbf
-
-export RPC_URL=http://127.0.0.1:8545
-
+Configure the key and the rpc. If you are using the defaul `anvil` parameters they should be these ones.
+```
 export PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+export RPC=http://127.0.0.1:8545
+```
 
-forge create src/VerifyPessimisticProof.sol:VerifyPessimisticProof --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --constructor-args $VERIFIER $PROGRAM_VKEY
+Now that we have our network up and running, lets deploy the contracts.
+```
+cd contracts
+```
 
-got this contract
-0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
+Deploy our own SP1 Verifier. Note we are currently pointing to `v5.0.0`.
 
-debug like this
+```
+forge create \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  contracts/lib/sp1-contracts/contracts/src/v5.0.0/SP1VerifierPlonk.sol:SP1Verifier --broadcast
+```
 
+With the address you got, set that as verifier.
+
+```
+export VERIFIER=0xthe_address_you_got
+```
+
+And debug the deployment went fine. You should get the same version from above, `v5.0.0` in our case.
+
+```
+cast call $VERIFIER "VERSION()" | cast --to-ascii
+```
+
+
+Now deploy the Pessimistic Proof contract verifier.
+
+```
+forge create \
+  --rpc-url $RPC_URL \
+  --private-key $PRIVATE_KEY \
+  --broadcast \
+  src/VerifyPessimisticProof.sol:VerifyPessimisticProof \
+  --constructor-args $VERIFIER
+```
+
+And store the address you got.
+
+```
+export PP_VERIFIER=0xthe_address_you_got
+```
+
+Ensure the deployment worked by calling the following function. Verify it matches your `VERIFIER`.
+
+```
 cast call \
-  0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9 \
-  "getVKey()" \
+  $PP_VERIFIER \
+  "getVerifier()" \
   --rpc-url $RPC_URL
+```
 
+Now you have your own private network with all the contracts needed for the next section.
+
+## Create the proofs
+
+Now lets create some zero-knowledge proofs using SP1. We will create two types of proofs:
+* A PLONK Pessimistic Proof for a given chain.
+* A PLONK Aggregation Proof, that verifies that `n` PLONK Pessimistic Proofs are valid.
+
+First of all we need to know the so called `vkey` of your program.
+Every program is identified by its `vkey`. We have one for the pessimistic program and one for the aggregation program.
+
+```
+cargo run --release -- --vkeys
+aggregation_vk: "0x0075c8c5c73f99b78a8f716cc139155ec6c8bf389c50451bb23759a82629c9bc"
+pessimistic_vk: "0x0016184113c3e8415f940f56a6eee68a6e623ae47b837e5633da14b0f1b9119c"
+```
+
+Store them:
+```
+export AGGREGATION_VKEY=0x0075c8c5c73f99b78a8f716cc139155ec6c8bf389c50451bb23759a82629c9bc
+export PESSIMISTIC_VKEY=0x0016184113c3e8415f940f56a6eee68a6e623ae47b837e5633da14b0f1b9119c
+```
+
+Now lets create a PLONK Pessimistic Proof.
+
+First and foremost, you need an account in the SP1 network with some funds.
+Proof generation should take few cents.
+
+```
+export NETWORK_PRIVATE_KEY=0xyour_sp1_private_key_with_funds
+```
+
+Now run the following command.
+
+```
+RUST_BACKTRACE=1 SP1_PROVER=network NETWORK_PRIVATE_KEY=$NETWORK_PRIVATE_KEY cargo run --release -- --prove
+```
+
+And among other things you will get the proof and public inputs of a PLONK Pessimistic Proof.
+Two proofs for two chains are generated. You can configure that.
+Save that for later.
+
+```
+[aggchain_id: 1] Public values: "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000013f4b9e2bb63b8a124ca9c44e465dadff6605b3b728a63876df1bc8848fedb70913172e09840453518fe8fe3b5174c1d4ebe3614a492596569acd8c012839135e77a4e3ccd788020f5b86128c69d846faa47e54c2f4e1d85be6020ad75271f173"
+
+[aggchain_id: 1] Proof: "0xd4e8ecd21f7e8271197dcb6c9a6154fabc7a6c4843cf50703404a715d228d5c88f2ab54d1880066bedc41c12e8ef01aa4855825d7701512e98395243b47f65cd95398e0b2bac7edcec5e80d62487484964a39d9967d024a47ab99076eb05ba598e91f8661575dec5e5d53dd8cb28d4af4f09a5f0eb8191d82e4f026d78cc30338704a6c029d6ea051fcec7e9d74e799f29e260d7d11aa12f5c1167e4dc4369c651b588b9104b55a608c72d8fa1a247ee0bac048f83a7c21d944f2e1ee94cb7404610bcb614f47e7c19bab932221f7a2fcf39bbc39f13a7edc75ee4510a197c2e2457cf960ef8afc3d1c0b1a8a20b3cc0a74b3c5777230dcfb86b4b8e4c5d63449f44f0a01e61931eeb0e4c0df8e64546761dc8314ad86d63e1b27a89bf1f482f161be5021eec2473e6e9ff8feed50e7fbe1adcbcee4bd6e2452fa9ab62d58c12cebc3a2f0dcadf8ab61e90b37e102510a48599ff792897a2a7cfaf858f85fb8a3fc123c72bc0952f2a9c43cc3a7b45cef5a52e88ccc60d1d9e4234ee375b89ea0509d1d003e53a03ca1491f2921145643a743a07302f7f1279f7dd2634172d400dc3802f2986ce4b38e6bb4144fad27a4143d75320970cc0cc52464dc4b89c7a185476b10948723a537b2aa9000349dd4188469a372cedb4e90aece69d64e8901d8fd4f5276004cbf6359578cbc6bbb1f879a8aa5a768ed9a4aa48d00c84b329152b03bc1808b3947a0ba3015d554911d6f588f72bc4a79317f472315356a0b1d2707c431e075d6236c8c3e59d9670642fcec2feb87c9fb9798ed83bb897e882af51289c1c37f2c8d70700839b61f7956fc391501cbca787caaf5dee7613670a802f0c7b0036503596a1a02bd3043880ac84fdc88ad581eabc618c6a72a15675587901cd0e9210b026c0b15d845213069bf27abc974795e52a6a52bd390a7b76d1064947247798bb6e341a91f63ec6dc50105d24ed6b7c4708f5d873f77900442e99b5b919f0839e0c12030b0cc88745891d071be6cc021ff98b96a6df43fe16523df27703b5b4a6d9254322c804aabd33952ad3ef61c85bc3eca534d6143e6ff6d8c6ef18e803fc11f6581a7a1e5e15c8cfe708d4f994aa082d85174a27e3a9dc1729ad15e14de0843d59bcf030d6a9fef7e63b3925f6f9fe244aeb9a5202ac88022f4f1b27b3afb64ec98bb61622abe52b9bcbf86b3a5ce4efb1dbc7656cabdd7cb439"
+
+[aggchain_id: 2] Public values: "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023f4b9e2bb63b8a124ca9c44e465dadff6605b3b728a63876df1bc8848fedb709660d137a6b1abe3810e7392a30feccf83ab6be70ab39ec948e0821448be34d89213527e7b945a567dd542fb0d6846e84fe4fea8c11e71e1b2191cfba3c7287f6"
+[aggchain_id: 2] Proof: "0xd4e8ecd22db008886e4e0061ac9fb55c08f313cca84e1d6bacb2ae05e5a4e28a1c3c32aa2318a6bb14d9c3ba4c7ae3e30c9eff320040bf82935c706daa4e196c9b73d1f92faf6af5b8f979d30e82d930b232ed4c2ed6d2d78207fb44d0981293b5374186060ffb3f99163b372ef97096f5d9cfe9f8a22ea425a24e5517d466957fd40e4d1103b977c2363cdd2c84b8dfb1554b08530d49c84c6e4bed5c4cededd00973a70f70111194dc8abb9af9f627f60d3a9381215eeb1dd64ac44a1536e5bebbeca52e1775690a3443149fd8dce9ae93cc0afb735af72de1ca56c438c95d64ad41dd14220ce1a57c2005345a1e5b412ec47dd6bd03647acfab9cae2af96856d6ea232f8f5f166bb8539cf5c7cc9c4b19c8be1782836791ec85dde44d030fc9c7c0b20987d1da822c4f13fd7ad8c7792436b99ff074e6a0be551f0ac646d9f789314713fe5f8e50ecc43ae18c6aa36be7421585f5bf559a95c4c134900eaef5cfe5201ff1ef36891c90293bec744c9f3844e0bb462286958e42540e6599ef03f2530101524cdf9ec59f93a9cc29e5c1dc5f38cbbe007d4b71f870d14dcabd2e55c8702479ae2bc68f3648fa7e3e05983fbbc1240924dca81b7599308c86d0faccf3710dfbe75db71dcacffbaeafa45ca997787efd6598ac73315b1708a8b29d1178dc03c0bd9ef99092eaca88ab6a501f0ec0993f91bd4fe85e4faba6b65bbd2781f42c5df42ee66384f49bc60479837f432dc6ca61dcb9e1085e1fa3ccda988f12012774649f05450f898152ccdd23de129d131de5e67b6b587329aa0ab27538693e2139a9dba96fb8012717d7bc8d54339f9f83a2f0b39f21eb113c546f2d27e3c829a4c2ecfdd8a7cae0467af3eb9806a4f7df3beef6e7e7c3f8a3a8637398a91f2e43beb69cf63eaa19d20cc6721ef3cb2fcad8033fca76b164b04c643991e025179978a870deda7d41637888414e4c9bddb77d115bafe6a3769136b851a099622cf8bfe3cd3e3123dc7b636f09bc19284b7ac595de1dd24b59de04308468127a05e35c80933ce4ec4e67b80632cb1c76e93b94f8e150b2f5c3813d94b06f6def1a6e0e92401ffeff58d2ac8db2c28d4123ef3167e2b7b850727eb53f5e5416f706ed7989293054d91f84d6dd8fde21573cb97cf52822ce07a517eae166c7fabd20927bd17add2310768e5440830ddabc52ac26b5c54661c4d421d06e51473e21"
+```
+
+On the other hand, if you want to generate an aggregation proof that verifies that the two other proofs are corrects,
+you just have to pass the `--aggregate` flag. This will input an extra proof.
+
+```
+RUST_BACKTRACE=1 SP1_PROVER=network NETWORK_PRIVATE_KEY=$NETWORK_PRIVATE_KEY cargo run --release -- --prove
+ --aggregate
+```
+
+Now you have everything you need to use this proofs onchain, with the contracts we deployed before.
+
+## Verify the proofs
+
+Using the Pessimistic Proof you got before, and the vkey, you can go directly to the SP1 verifier and verify if its correct.
+There are three parameters:
+
+* vkey: Identifies your program.
+* public inputs: Parameters you have commited to.
+* proof: The PLONK proof.
+
+Note that it's a view function since it doesn't modify state, so we can use `call`.
+```
+cast call \
+  $VERIFIER \
+  "verifyProof(bytes32,bytes,bytes)" \
+  "0x0016184113c3e8415f940f56a6eee68a6e623ae47b837e5633da14b0f1b9119c" \
+  "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003f4b9e2bb63b8a124ca9c44e465dadff6605b3b728a63876df1bc8848fedb709de0a705bad84bfa4ac52ec36a5bd703c313d4a4e0b75985ca3d878c4d6db18a6df86f535e358f771906e88e72d72a6fcfc912181f7f05a690f649ac3920dd395" \
+  "0xd4e8ecd20e014c7e4f9cd7a519e21ffb7fd7e1c3e67344c113517ff30b778bad367345d20bc2c10c0215f821090ce1917ca116ec3cfcd587c55410ab0d70693670cbf3e81c69d1aeae55cbb5f43f9102a9e9ad4b7117d3330932f233ea1557ad077bb0f9305ba982aba2078938e3b505f2f0089ffdac695a3bac6f67bcd5a68b65058df9046e6292e592a6294687173dc0b8a305039165bf47b75c78a9ece67e0d352c1a14c5afc1b8c04ef8304e408548310fd156f0f4dd95564990c00a244a9dae88f91c3e5beef698f2eeec6239f11bcf1afe5fc643f17524be33067a2c04e4256d940407e69835095b81093d46e21eb728a7ac1c31d4a75d0764211fa68413026a5c1dc9c9b8b824af00e24abc081c1dbc84ae6d3a4d21c3668396ce958f28f987e01713007fcffd598610b4c497fe8e38a76e7e59277ee31a2edbbb739c28146efa09566f19b8510451ce5758e74761a01ef49887c71315aec027495446be18f48e0d7ebdac831978278e227863bae18f71d2047c912d132b63f83c3064be907fd209c5cea777b1b83170a5a264d0c20f422a5c83b9b4133225cd91d41189f284922fa18b6ab7dbcfc95758118e4e14f3c5024250a5716dc1df2fef23d78688b52a2e0355fdd684a2ddd3338c5730bf16c7ccca2b478d468dfd934fd4e8afa1a4a522f10e5d45df6915bd519f7726bee3a62d2945c3831484f947c64bd3b364aa952ac087fec28b8e70c3deabd9166b5c2a4a3ec100819d668d9d0f3fa47ac7878713bd0da236996c224bec790e852414d3b43602b4eddff61f5813a1b95a08910307fea66809754777374765b9e2f761aba14d5cf16bc23bc299f162e6356da83b1d25f84227b7e433f032148dcf7eb4d4f36663cdec66420c0f34f29ca3e756792a3b755b79e9b5cfa6537e21501f2fd261c01b740b262137e2517011e33f350f1227df676ba4f479080aa8bac194344efbdc1f54046c4efd20981a1b8537b2061979660b9fbcc390bcf2bdcc17932bbc81aefb73e168fe04a26211bc2f7ada2e07e932b5dc19a6e09b9fef53e1532c093a9b58e9f077c61aa82af9d21402cc231776ea8fb6d18c4bb9b9e7637110a8d98d766e5e8457bfa96bc523da011885f6149d1f5ee71fc359ed70b6806901c3a433896aa580f903cc58c251cb30457f302432b1e6fb272473c1f82d6b903e2b892f7bcef7525c3e84e386930a07bcec55" \
+  --rpc-url $RPC_URL
+```
+
+In reality you won't be calling the SP1 verifier directly, but a contract with some logic to execute if the proof is valid.
+We can call the `verifyPessimisticProof` function as follows. This does require gas.
 
 ```
 cast send \
-  0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9 \
-  "verifyPessimisticProof(bytes,bytes)" \
-  "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003f4b9e2bb63b8a124ca9c44e465dadff6605b3b728a63876df1bc8848fedb709de0a705bad84bfa4ac52ec36a5bd703c313d4a4e0b75985ca3d878c4d6db18a6df86f535e358f771906e88e72d72a6fcfc912181f7f05a690f649ac3920dd395" "0xd4e8ecd20e014c7e4f9cd7a519e21ffb7fd7e1c3e67344c113517ff30b778bad367345d20bc2c10c0215f821090ce1917ca116ec3cfcd587c55410ab0d70693670cbf3e81c69d1aeae55cbb5f43f9102a9e9ad4b7117d3330932f233ea1557ad077bb0f9305ba982aba2078938e3b505f2f0089ffdac695a3bac6f67bcd5a68b65058df9046e6292e592a6294687173dc0b8a305039165bf47b75c78a9ece67e0d352c1a14c5afc1b8c04ef8304e408548310fd156f0f4dd95564990c00a244a9dae88f91c3e5beef698f2eeec6239f11bcf1afe5fc643f17524be33067a2c04e4256d940407e69835095b81093d46e21eb728a7ac1c31d4a75d0764211fa68413026a5c1dc9c9b8b824af00e24abc081c1dbc84ae6d3a4d21c3668396ce958f28f987e01713007fcffd598610b4c497fe8e38a76e7e59277ee31a2edbbb739c28146efa09566f19b8510451ce5758e74761a01ef49887c71315aec027495446be18f48e0d7ebdac831978278e227863bae18f71d2047c912d132b63f83c3064be907fd209c5cea777b1b83170a5a264d0c20f422a5c83b9b4133225cd91d41189f284922fa18b6ab7dbcfc95758118e4e14f3c5024250a5716dc1df2fef23d78688b52a2e0355fdd684a2ddd3338c5730bf16c7ccca2b478d468dfd934fd4e8afa1a4a522f10e5d45df6915bd519f7726bee3a62d2945c3831484f947c64bd3b364aa952ac087fec28b8e70c3deabd9166b5c2a4a3ec100819d668d9d0f3fa47ac7878713bd0da236996c224bec790e852414d3b43602b4eddff61f5813a1b95a08910307fea66809754777374765b9e2f761aba14d5cf16bc23bc299f162e6356da83b1d25f84227b7e433f032148dcf7eb4d4f36663cdec66420c0f34f29ca3e756792a3b755b79e9b5cfa6537e21501f2fd261c01b740b262137e2517011e33f350f1227df676ba4f479080aa8bac194344efbdc1f54046c4efd20981a1b8537b2061979660b9fbcc390bcf2bdcc17932bbc81aefb73e168fe04a26211bc2f7ada2e07e932b5dc19a6e09b9fef53e1532c093a9b58e9f077c61aa82af9d21402cc231776ea8fb6d18c4bb9b9e7637110a8d98d766e5e8457bfa96bc523da011885f6149d1f5ee71fc359ed70b6806901c3a433896aa580f903cc58c251cb30457f302432b1e6fb272473c1f82d6b903e2b892f7bcef7525c3e84e386930a07bcec55" \
-  --rpc-url $RPC_URL \
-  --private-key $PRIVATE_KEY
+  $PP_VERIFIER \
+  "verifyPessimisticProof(bytes32,bytes,bytes)" \
+  "0x0016184113c3e8415f940f56a6eee68a6e623ae47b837e5633da14b0f1b9119c" \
+  "0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003f4b9e2bb63b8a124ca9c44e465dadff6605b3b728a63876df1bc8848fedb709de0a705bad84bfa4ac52ec36a5bd703c313d4a4e0b75985ca3d878c4d6db18a6df86f535e358f771906e88e72d72a6fcfc912181f7f05a690f649ac3920dd395" \
+  "0xd4e8ecd20e014c7e4f9cd7a519e21ffb7fd7e1c3e67344c113517ff30b778bad367345d20bc2c10c0215f821090ce1917ca116ec3cfcd587c55410ab0d70693670cbf3e81c69d1aeae55cbb5f43f9102a9e9ad4b7117d3330932f233ea1557ad077bb0f9305ba982aba2078938e3b505f2f0089ffdac695a3bac6f67bcd5a68b65058df9046e6292e592a6294687173dc0b8a305039165bf47b75c78a9ece67e0d352c1a14c5afc1b8c04ef8304e408548310fd156f0f4dd95564990c00a244a9dae88f91c3e5beef698f2eeec6239f11bcf1afe5fc643f17524be33067a2c04e4256d940407e69835095b81093d46e21eb728a7ac1c31d4a75d0764211fa68413026a5c1dc9c9b8b824af00e24abc081c1dbc84ae6d3a4d21c3668396ce958f28f987e01713007fcffd598610b4c497fe8e38a76e7e59277ee31a2edbbb739c28146efa09566f19b8510451ce5758e74761a01ef49887c71315aec027495446be18f48e0d7ebdac831978278e227863bae18f71d2047c912d132b63f83c3064be907fd209c5cea777b1b83170a5a264d0c20f422a5c83b9b4133225cd91d41189f284922fa18b6ab7dbcfc95758118e4e14f3c5024250a5716dc1df2fef23d78688b52a2e0355fdd684a2ddd3338c5730bf16c7ccca2b478d468dfd934fd4e8afa1a4a522f10e5d45df6915bd519f7726bee3a62d2945c3831484f947c64bd3b364aa952ac087fec28b8e70c3deabd9166b5c2a4a3ec100819d668d9d0f3fa47ac7878713bd0da236996c224bec790e852414d3b43602b4eddff61f5813a1b95a08910307fea66809754777374765b9e2f761aba14d5cf16bc23bc299f162e6356da83b1d25f84227b7e433f032148dcf7eb4d4f36663cdec66420c0f34f29ca3e756792a3b755b79e9b5cfa6537e21501f2fd261c01b740b262137e2517011e33f350f1227df676ba4f479080aa8bac194344efbdc1f54046c4efd20981a1b8537b2061979660b9fbcc390bcf2bdcc17932bbc81aefb73e168fe04a26211bc2f7ada2e07e932b5dc19a6e09b9fef53e1532c093a9b58e9f077c61aa82af9d21402cc231776ea8fb6d18c4bb9b9e7637110a8d98d766e5e8457bfa96bc523da011885f6149d1f5ee71fc359ed70b6806901c3a433896aa580f903cc58c251cb30457f302432b1e6fb272473c1f82d6b903e2b892f7bcef7525c3e84e386930a07bcec55" \
+  --private-key $PRIVATE_KEY \
+  --rpc-url $RPC_URL
 ```
 
-# SP1 Project Template
+And finally, you can also call `verifyMultiplePessimisticProofs` which uses proof aggregation to verify that multiple Pessimistic Proofs are valid.
 
-This is a template for creating an end-to-end [SP1](https://github.com/succinctlabs/sp1) project
-that can generate a proof of any RISC-V program.
-
-## Requirements
-
-- [Rust](https://rustup.rs/)
-- [SP1](https://docs.succinct.xyz/docs/sp1/getting-started/install)
-
-## Running the Project
-
-There are 3 main ways to run this project: execute a program, generate a core proof, and
-generate an EVM-compatible proof.
-
-### Build the Program
-
-The program is automatically built through `script/build.rs` when the script is built.
-
-### Execute the Program
-
-To run the program without generating a proof:
-
-```sh
-cd script
-cargo run --release -- --execute
 ```
-
-This will execute the program and display the output.
-
-### Generate an SP1 Core Proof
-
-To generate an SP1 [core proof](https://docs.succinct.xyz/docs/sp1/generating-proofs/proof-types#core-default) for your program:
-
-```sh
-cd script
-cargo run --release -- --prove
-```
-
-### Generate an EVM-Compatible Proof
-
-> [!WARNING]
-> You will need at least 16GB RAM to generate a Groth16 or PLONK proof. View the [SP1 docs](https://docs.succinct.xyz/docs/sp1/getting-started/hardware-requirements#local-proving) for more information.
-
-Generating a proof that is cheap to verify on the EVM (e.g. Groth16 or PLONK) is more intensive than generating a core proof.
-
-To generate a Groth16 proof:
-
-```sh
-cd script
-cargo run --release --bin evm -- --system groth16
-```
-
-To generate a PLONK proof:
-
-```sh
-cargo run --release --bin evm -- --system plonk
-```
-
-These commands will also generate fixtures that can be used to test the verification of SP1 proofs
-inside Solidity.
-
-### Retrieve the Verification Key
-
-To retrieve your `programVKey` for your on-chain contract, run the following command in `script`:
-
-```sh
-cargo run --release --bin vkey
-```
-
-## Using the Prover Network
-
-We highly recommend using the [Succinct Prover Network](https://docs.succinct.xyz/docs/network/introduction) for any non-trivial programs or benchmarking purposes. For more information, see the [key setup guide](https://docs.succinct.xyz/docs/network/developers/key-setup) to get started.
-
-To get started, copy the example environment file:
-
-```sh
-cp .env.example .env
-```
-
-Then, set the `SP1_PROVER` environment variable to `network` and set the `NETWORK_PRIVATE_KEY`
-environment variable to your whitelisted private key.
-
-For example, to generate an EVM-compatible proof using the prover network, run the following
-command:
-
-```sh
-SP1_PROVER=network NETWORK_PRIVATE_KEY=... cargo run --release --bin evm
+TODO: Still not working
 ```

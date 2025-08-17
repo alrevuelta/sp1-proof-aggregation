@@ -2885,6 +2885,7 @@ dependencies = [
  "alloy-sol-types",
  "clap",
  "dotenv",
+ "futures",
  "hex",
  "pessimistic-proof",
  "pessimistic-proof-core",
