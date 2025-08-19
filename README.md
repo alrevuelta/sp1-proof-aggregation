@@ -177,6 +177,14 @@ cast send \
   --rpc-url $RPC_URL
 ```
 
+Ensure the LER was updated.
+
+```
+cast call \
+  $PP_VERIFIER \
+  "getLER(uint32)(bytes32)" 0
+```
+
 And finally, you can also call `verifyMultiplePessimisticProofs` which uses proof aggregation to verify that multiple Pessimistic Proofs are valid.
 
 ```

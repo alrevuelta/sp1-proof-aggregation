@@ -5,6 +5,7 @@ use alloy::{
 };
 use alloy_primitives::Address;
 use alloy_primitives::{address, Signature, U256};
+use alloy_sol_types::sol;
 use clap::Parser;
 use futures;
 use pessimistic_proof::core::commitment::SignatureCommitmentValues;
@@ -29,6 +30,7 @@ use sp1_sdk::{
     include_elf, HashableKey, ProverClient, SP1Proof, SP1ProofWithPublicValues, SP1Stdin,
     SP1VerifyingKey,
 };
+
 use std::str::FromStr;
 use std::{collections::BTreeMap, process::exit};
 
@@ -73,8 +75,6 @@ async fn main() {
     // Setup the prover client.
     let client = ProverClient::from_env();
 
-    println!("------new ler okio------: {:?}", LocalExitRoot::default());
-
     let (aggregation_pk, aggregation_vk) = client.setup(AGGREGATION_ELF);
     let (pessimistic_pk, pessimistic_vk) = client.setup(PESSIMISTIC_ELF);
 
@@ -84,11 +84,12 @@ async fn main() {
         exit(0);
     }
 
-    let aggchain_ids = vec![0, 1, 2];
+    // Generate Pessimistic Proofs for two chains.
+    let aggchain_ids = vec![0, 1];
 
     let initial_states: Vec<NetworkState> = aggchain_ids
         .iter()
-        .map(|i| LocalNetworkState::default().into())
+        .map(|_i| LocalNetworkState::default().into())
         .collect();
 
     let batch_headers: Vec<MultiBatchHeader> = futures::future::join_all(
@@ -146,12 +147,14 @@ async fn main() {
             stdin.write(&initial_state);
             stdin.write(&batch_header);
 
-            // Generate the proof
-            let proof = client
-                .prove(&pessimistic_pk, &stdin)
-                .plonk()
-                .run()
-                .expect("failed to generate proof");
+            // Generate the proof. If we want to aggregate, we use the compressed proof.
+            let proof = if args.aggregate {
+                client.prove(&pessimistic_pk, &stdin).compressed()
+            } else {
+                client.prove(&pessimistic_pk, &stdin).plonk()
+            }
+            .run()
+            .expect("failed to generate proof");
 
             println!(
                 "[aggchain_id: {}] Successfully generated proof!",
@@ -168,17 +171,19 @@ async fn main() {
                 batch_header.origin_network
             );
 
-            let public_values =
-                format!("0x{}", hex::encode(proof.clone().public_values.as_slice()));
-            let proof_formated = format!("0x{}", hex::encode(proof.bytes()));
+            if !args.aggregate {
+                let proof_formated = format!("0x{}", hex::encode(proof.bytes()));
+
+                println!(
+                    "[aggchain_id: {}] Proof: {:?}",
+                    batch_header.origin_network, proof_formated
+                );
+            }
 
             println!(
                 "[aggchain_id: {}] Public values: {:?}",
-                batch_header.origin_network, public_values
-            );
-            println!(
-                "[aggchain_id: {}] Proof: {:?}",
-                batch_header.origin_network, proof_formated
+                batch_header.origin_network,
+                format!("0x{}", hex::encode(proof.clone().public_values.as_slice()))
             );
 
             pp_proofs.push(AggregationInput {
@@ -287,48 +292,55 @@ async fn create_batch_header(initial_state: &NetworkState, network_id: u32) -> M
         l1_info_root: B256::ZERO.into(),
         balances_proofs: BTreeMap::new(),
         aggchain_proof: AggchainData::ECDSA {
-            // TODO: Will be replaced
+            // Default value, replaced later with the signature
             signer: Address::default().into(),
-            // random number, this is replaced.
-            signature: Signature::from_str("48b55bfa915ac795c431978d8a6a992b628d557da5ff759b307d495a36649353efffd310ac743f371de3b9f7f9cb56c0b28ad43601b4ab949f53faa07bd2c8041b").unwrap().into(),
+            // Default value, replaced later with the signature
+            signature: Signature::from_raw_array(&[0x00; 65]).unwrap().into(),
         },
     };
-    println!("batch_header: {:?}", batch_header);
 
-    let mut cloned_initial_state = initial_state.clone();
-
-    let final_state_commitment = cloned_initial_state
+    // Cloning since we dont want to mutate the initial state.
+    let final_state_commitment = initial_state
+        .clone()
         .apply_batch_header(&batch_header)
         .unwrap();
 
-    println!("count: {:?}", cloned_initial_state.exit_tree.leaf_count);
-
-    // TODO: Print the state transition here.
-
-    let signature_commitment_values = SignatureCommitmentValues {
+    let commitment = SignatureCommitmentValues {
         new_local_exit_root: final_state_commitment.exit_root,
-        // TODO:? I have to modify this if adding imports?
         commit_imported_bridge_exits: ImportedBridgeExitCommitmentValues { claims: vec![] },
         height: 0,
-    };
+    }
+    .commitment(CommitmentVersion::V3);
 
-    let commitment = signature_commitment_values.commitment(CommitmentVersion::V3);
-    println!("commitment: {:?}", commitment);
+    // Sign the commitment and add it to the batch header.
     let signed_commitment = signer.sign_hash(&commitment.into()).await.unwrap();
-    println!("signed_commitment: {:?}", signed_commitment);
-    let recovered_address = signed_commitment
-        .recover_address_from_prehash(&commitment.into())
-        .unwrap();
-    println!("recovered_address: {:?}", recovered_address);
-    // put the new signature here
     batch_header.aggchain_proof = AggchainData::ECDSA {
-        signer: recovered_address.into(),
+        signer: signed_commitment
+            .recover_address_from_prehash(&commitment.into())
+            .unwrap()
+            .into(),
         signature: signed_commitment.into(),
     };
 
+    // Simulate the state transition
+    let (pp_output, _) = generate_pessimistic_proof(initial_state.clone(), &batch_header).unwrap();
     println!(
-        "final_state_commitment: {:?}",
-        final_state_commitment.exit_root
+        "[aggchain_id: {}] State transition LER: {:?} -> {:?}",
+        network_id, pp_output.prev_local_exit_root, pp_output.new_local_exit_root
     );
+
+    println!(
+        "[aggchain_id: {}] State transition PPRoot: {:?} -> {:?}",
+        network_id, pp_output.prev_pessimistic_root, pp_output.new_pessimistic_root
+    );
+    println!(
+        "[aggchain_id: {}] Aggchain hash: {:?}",
+        network_id, pp_output.aggchain_hash
+    );
+    println!(
+        "[aggchain_id: {}] L1 info root: {:?}",
+        network_id, pp_output.l1_info_root
+    );
+
     batch_header
 }

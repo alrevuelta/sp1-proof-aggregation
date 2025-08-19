@@ -8,3 +8,4 @@ alloy-sol-types = { workspace = true }
 sp1-zkvm = "=5.0.0"
 pessimistic-proof-core = { git = "https://github.com/agglayer/agglayer", branch = "main", package = "pessimistic-proof-core" }
 sha2 = "0.10.8"
+sha3 = "0.10.8"

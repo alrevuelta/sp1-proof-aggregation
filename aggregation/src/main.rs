@@ -4,24 +4,37 @@
 // inside the zkVM.
 #![no_main]
 sp1_zkvm::entrypoint!(main);
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
+// TODO: Replace optimized tiny keccak?
+use sha3::{Digest as Sha3Digest, Keccak256};
 
 pub fn main() {
     // Read the verification keys.
     let vkeys = sp1_zkvm::io::read::<Vec<[u32; 8]>>();
+    // TODO: Support just one vkey?
 
     // Read the public values.
     let public_values = sp1_zkvm::io::read::<Vec<Vec<u8>>>();
+    // TODO: Maybe pass directly the hash of the public values
 
     // Verify the proofs.
     assert_eq!(vkeys.len(), public_values.len());
+    let mut keccak_chain = Keccak256::new();
+    let mut pp_hashchain: [u8; 32] = [0u8; 32];
+
     for i in 0..vkeys.len() {
         let vkey = &vkeys[i];
         let public_values = &public_values[i];
-        // TODO: unsure why hash is needed here.
         let public_values_digest = Sha256::digest(public_values);
         sp1_zkvm::lib::verify::verify_sp1_proof(vkey, &public_values_digest.into());
+
+        // Update keccak256 hashchain: H = keccak256(H || sha256_digest(public_values))
+        keccak_chain.update(&pp_hashchain);
+        keccak_chain.update(public_values_digest.as_slice());
+        pp_hashchain.copy_from_slice(&keccak_chain.finalize_reset());
     }
 
-    // TODO: Need to commit something here?
+    // TODO: commit vkeys.
+
+    sp1_zkvm::io::commit_slice(&pp_hashchain);
 }
