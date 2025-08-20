@@ -44,13 +44,20 @@ contract VerifyPessimisticProof {
     }
     
     // A dummy implementation to verify multiple proofs at once. Not aiming to be complete.
-    function verifyMultiplePessimisticProofs(bytes32 _vKey, bytes[] calldata _ppOutputs, bytes calldata _proofBytes)
+    function verifyMultiplePessimisticProofs(
+        bytes32 _aggregationVKey,
+        bytes32 _pessimisticVKey,
+        bytes[] calldata _ppOutputs,
+        bytes calldata _proofBytes)
         public
     {
         // Verify the aggregated proof is correct.
         ISP1Verifier(verifier).verifyProof(
-            _vKey,
-            abi.encodePacked(computeHashChain(_ppOutputs)),
+            _aggregationVKey,
+            abi.encodePacked(computeHashChain(_ppOutputs), _pessimisticVKey),
+            // TODO: This is wrong since _pessimisticVKey is hashed in Sp1. So i would need to hash it here.
+            // But it uses baby bear, which in solidity would be expensive. Plan b: In sp1 commit to
+            // to the unhashed vkey. Not trivial though.
             _proofBytes);
 
         // Do the state transition for each aggchain.

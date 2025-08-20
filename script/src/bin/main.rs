@@ -53,11 +53,6 @@ struct Args {
     aggregate: bool,
 }
 
-struct AggregationInput {
-    pub proof: SP1ProofWithPublicValues,
-    pub vk: SP1VerifyingKey,
-}
-
 #[tokio::main]
 async fn main() {
     // Setup the logger.
@@ -138,7 +133,7 @@ async fn main() {
         }
     } else {
         // Generate and store all pessimistic proofs for all aggchain_ids.
-        let mut pp_proofs: Vec<AggregationInput> = Vec::new();
+        let mut pp_proofs: Vec<SP1ProofWithPublicValues> = Vec::new();
 
         for (initial_state, batch_header) in initial_states.iter().zip(batch_headers.iter()) {
             // Setup the inputs.
@@ -186,10 +181,7 @@ async fn main() {
                 format!("0x{}", hex::encode(proof.clone().public_values.as_slice()))
             );
 
-            pp_proofs.push(AggregationInput {
-                proof,
-                vk: pessimistic_vk.clone(),
-            });
+            pp_proofs.push(proof);
         }
 
         // Only generate the aggregation proof if the user wants to.
@@ -202,17 +194,14 @@ async fn main() {
         // Create a proof that verifies all the pessimistic proofs.
         let mut stdin = SP1Stdin::new();
 
-        // Write the verification keys.
-        let vkeys = pp_proofs
-            .iter()
-            .map(|input| input.vk.vk.hash_u32())
-            .collect::<Vec<_>>();
-        stdin.write::<Vec<[u32; 8]>>(&vkeys);
+        // Write the verification key.
+        let vkey = pessimistic_vk.hash_u32();
+        stdin.write::<[u32; 8]>(&vkey);
 
         // Write the public values.
         let public_values = pp_proofs
             .iter()
-            .map(|input| input.proof.public_values.to_vec())
+            .map(|proof| proof.public_values.to_vec())
             .collect::<Vec<_>>();
         stdin.write::<Vec<Vec<u8>>>(&public_values);
 
@@ -220,10 +209,10 @@ async fn main() {
         // Note: this data will not actually be read by the aggregation program, instead it will be
         // witnessed by the prover during the recursive aggregation process inside SP1 itself.
         for input in pp_proofs {
-            let SP1Proof::Compressed(proof) = input.proof.proof else {
+            let SP1Proof::Compressed(proof) = input.proof else {
                 panic!()
             };
-            stdin.write_proof(*proof, input.vk.vk);
+            stdin.write_proof(*proof, pessimistic_vk.vk.clone());
         }
 
         // Generate the plonk bn254 proof.
