@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import {ISP1Verifier} from "@sp1-contracts/ISP1Verifier.sol";
 
-struct PublicValuesStruct {
+struct PessimisticProofOutput {
     bytes32 prev_local_exit_root;
     bytes32 prev_pessimistic_root;
     bytes32 l1_info_root;
@@ -26,30 +26,43 @@ contract VerifyPessimisticProof {
         return verifier;
     }
 
-    // Some dummy implementation of the proof verification. Not aiming to be complete.
-    function verifyPessimisticProof(bytes32 _vKey, bytes calldata _publicValues, bytes calldata _proofBytes)
+    // A dummy implementation of the proof verification. Not aiming to be complete.
+    function verifyPessimisticProof(bytes32 _vKey, bytes calldata _ppOutput, bytes calldata _proofBytes)
         public
     {
         // Verify the Pessimistic Proof.
-        ISP1Verifier(verifier).verifyProof(_vKey, _publicValues, _proofBytes);
+        ISP1Verifier(verifier).verifyProof(_vKey, _ppOutput, _proofBytes);
 
-        PublicValuesStruct memory publicValues = decodePublicValues(_publicValues);
+        PessimisticProofOutput memory ppOutput = decodePublicValues(_ppOutput);
 
-        require(publicValues.prev_local_exit_root == aggchainToLER[publicValues.origin_network], "Invalid previous LER");
-        require(publicValues.prev_pessimistic_root == aggchainToPPRoot[publicValues.origin_network], "Invalid previous PPRoot");
+        require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
+        require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
 
         // Do the state transition
-        aggchainToLER[publicValues.origin_network] = publicValues.new_local_exit_root;
-        aggchainToPPRoot[publicValues.origin_network] = publicValues.new_pessimistic_root;
+        aggchainToLER[ppOutput.origin_network] = ppOutput.new_local_exit_root;
+        aggchainToPPRoot[ppOutput.origin_network] = ppOutput.new_pessimistic_root;
     }
-
-    function verifyMultiplePessimisticProofs(bytes32 _vKey, bytes calldata _publicValues, bytes calldata _proofBytes)
+    
+    // A dummy implementation to verify multiple proofs at once. Not aiming to be complete.
+    function verifyMultiplePessimisticProofs(bytes32 _vKey, bytes[] calldata _ppOutputs, bytes calldata _proofBytes)
         public
     {
-        ISP1Verifier(verifier).verifyProof(_vKey, _publicValues, _proofBytes);
+        // Verify the aggregated proof is correct.
+        ISP1Verifier(verifier).verifyProof(
+            _vKey,
+            abi.encodePacked(computeHashChain(_ppOutputs)),
+            _proofBytes);
 
-        // TODO: Decode parameters of aggchainid and new LER and store them in the mapping.
-        aggchainToLER[0] = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
+        // Do the state transition for each aggchain.
+        for (uint256 i = 0; i < _ppOutputs.length; i++) {
+            PessimisticProofOutput memory ppOutput = decodePublicValues(_ppOutputs[i]);
+            require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
+            require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
+
+            // Do the state transition
+            aggchainToLER[ppOutput.origin_network] = ppOutput.new_local_exit_root;
+            aggchainToPPRoot[ppOutput.origin_network] = ppOutput.new_pessimistic_root;
+        }
     }
 
     function getLER(uint32 _aggchainId) public view returns (bytes32) {
@@ -59,12 +72,20 @@ contract VerifyPessimisticProof {
         return aggchainToPPRoot[_aggchainId];
     }
 
-    // TODO: Tests this
+    function computeHashChain(bytes[] calldata _ppOutputs) public pure returns (bytes32) {
+        bytes32 hashChain = bytes32(0);
+        for (uint256 i = 0; i < _ppOutputs.length; i++) {
+            bytes32 ppOutputDigest = sha256(_ppOutputs[i]);
+            hashChain = keccak256(abi.encodePacked(hashChain, ppOutputDigest));
+        }
+        return hashChain;
+    }
+
     // Decodes the values into a struct. Abi decode can't be used since it was encoded with packed encoding.
     function decodePublicValues(bytes memory data)
         public
         pure
-        returns (PublicValuesStruct memory s)
+        returns (PessimisticProofOutput memory s)
     {
         require(data.length == 196, "PackedDecoder: invalid length");
         assembly {
