@@ -35,8 +35,8 @@ contract VerifyPessimisticProof {
 
         PessimisticProofOutput memory ppOutput = decodePublicValues(_ppOutput);
 
-        require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
-        require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
+        //require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
+        //require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
 
         // Do the state transition
         aggchainToLER[ppOutput.origin_network] = ppOutput.new_local_exit_root;
@@ -46,7 +46,7 @@ contract VerifyPessimisticProof {
     // A dummy implementation to verify multiple proofs at once. Not aiming to be complete.
     function verifyMultiplePessimisticProofs(
         bytes32 _aggregationVKey,
-        bytes32 _pessimisticVKey,
+        bytes32 _hashedPessimisticVKey,
         bytes[] calldata _ppOutputs,
         bytes calldata _proofBytes)
         public
@@ -54,17 +54,15 @@ contract VerifyPessimisticProof {
         // Verify the aggregated proof is correct.
         ISP1Verifier(verifier).verifyProof(
             _aggregationVKey,
-            abi.encodePacked(computeHashChain(_ppOutputs), _pessimisticVKey),
-            // TODO: This is wrong since _pessimisticVKey is hashed in Sp1. So i would need to hash it here.
-            // But it uses baby bear, which in solidity would be expensive. Plan b: In sp1 commit to
-            // to the unhashed vkey. Not trivial though.
+            abi.encodePacked(computeHashChain(_ppOutputs), _hashedPessimisticVKey),
             _proofBytes);
 
         // Do the state transition for each aggchain.
         for (uint256 i = 0; i < _ppOutputs.length; i++) {
             PessimisticProofOutput memory ppOutput = decodePublicValues(_ppOutputs[i]);
-            require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
-            require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
+            
+            //require(ppOutput.prev_local_exit_root == aggchainToLER[ppOutput.origin_network], "Invalid previous LER");
+            //require(ppOutput.prev_pessimistic_root == aggchainToPPRoot[ppOutput.origin_network], "Invalid previous PPRoot");
 
             // Do the state transition
             aggchainToLER[ppOutput.origin_network] = ppOutput.new_local_exit_root;
