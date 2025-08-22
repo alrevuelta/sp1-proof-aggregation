@@ -76,6 +76,13 @@ async fn main() {
     if args.vkeys {
         println!("aggregation_vk: {:?}", aggregation_vk.bytes32());
         println!("pessimistic_vk: {:?}", pessimistic_vk.bytes32());
+        let hash_bytes: Vec<u8> = pessimistic_vk
+            .vk
+            .hash_u32()
+            .iter()
+            .flat_map(|w| w.to_be_bytes())
+            .collect();
+        println!("pessimistic_vk_hash: 0x{}", hex::encode(hash_bytes));
         exit(0);
     }
 
@@ -96,7 +103,14 @@ async fn main() {
     .await;
 
     println!("aggregation_vk: {:?}", aggregation_vk.bytes32());
-    println!("input_vk: {:?}", pessimistic_vk.bytes32());
+    println!("pessimistic_vk: {:?}", pessimistic_vk.bytes32());
+    let hash_bytes: Vec<u8> = pessimistic_vk
+        .vk
+        .hash_u32()
+        .iter()
+        .flat_map(|w| w.to_be_bytes())
+        .collect();
+    println!("pessimistic_vk_hash: 0x{}", hex::encode(hash_bytes));
 
     if args.execute {
         for (initial_state, batch_header) in initial_states.iter().zip(batch_headers.iter()) {
